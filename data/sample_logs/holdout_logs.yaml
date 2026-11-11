@@ -1,0 +1,64 @@
+# Conjunto separado (holdout): escrito depois da base de conhecimento e NÃO
+# usado para ajustar padrões ou pesos. Serve para medir o assistente em logs
+# que ele nunca "viu". Inclui falhas que a base não cobre (expected: desconhecido),
+# para testar se o assistente admite que não sabe.
+
+- name: h01_bq_quota
+  expected: api_rate_limit
+  difficulty: hard
+  log: |
+    [2026-10-28, 11:02:41 UTC] {bigquery.py:1650} ERROR - Job failed
+    google.api_core.exceptions.Forbidden: 403 Quota exceeded: Your project exceeded quota for concurrent queries. For more information, see https://cloud.google.com/bigquery/docs/troubleshoot-quotas
+
+- name: h02_kubernetes_evicted
+  expected: zombie_task
+  difficulty: hard
+  log: |
+    [2026-10-28, 02:10:00 UTC] {kubernetes_executor_utils.py:325} INFO - Event: airflow-worker-7c9 had an event of type MODIFIED
+    [2026-10-28, 02:10:00 UTC] {kubernetes_executor_utils.py:345} ERROR - Event: airflow-worker-7c9 Failed, reason: Evicted, message: The node was low on resource: ephemeral-storage.
+    [2026-10-28, 02:15:31 UTC] {scheduler_job_runner.py:1789} ERROR - Task instance sales_daily.load_sales did not send heartbeat for 300 seconds; marking as failed
+
+- name: h03_disco_cheio
+  expected: desconhecido
+  difficulty: hard
+  log: |
+    [2026-10-29, 04:44:12 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    Traceback (most recent call last):
+      File "/opt/airflow/dags/exports/export_parquet.py", line 61, in export
+        df.to_parquet(local_path)
+    OSError: [Errno 28] No space left on device
+
+- name: h04_ssl
+  expected: desconhecido
+  difficulty: hard
+  log: |
+    [2026-10-29, 06:00:09 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    requests.exceptions.SSLError: HTTPSConnectionPool(host='api.parceiro.example', port=443): Max retries exceeded with url: /v2/token (Caused by SSLError(SSLCertVerificationError(1, '[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: certificate has expired')))
+
+- name: h05_coluna_renomeada
+  expected: dataframe_missing_column
+  difficulty: easy
+  log: |
+    [2026-10-30, 03:30:02 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    KeyError: "None of [Index(['order_date', 'store_id'], dtype='object')] are in the [columns]"
+
+- name: h06_dataset_regiao
+  expected: bq_table_not_found
+  difficulty: easy
+  log: |
+    [2026-10-30, 05:12:30 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    google.api_core.exceptions.NotFound: 404 Not found: Dataset analytics-prd:marts was not found in location southamerica-east1
+
+- name: h07_mysql_gone
+  expected: db_connection_refused
+  difficulty: hard
+  log: |
+    [2026-10-31, 01:20:44 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    MySQLdb.OperationalError: (2006, 'MySQL server has gone away')
+
+- name: h08_template_macro
+  expected: jinja_template_error
+  difficulty: easy
+  log: |
+    [2026-10-31, 02:00:00 UTC] {abstractoperator.py:707} ERROR - Exception rendering Jinja template for task 'export', field 'bash_command'.
+    jinja2.exceptions.UndefinedError: 'execution_dat' is undefined

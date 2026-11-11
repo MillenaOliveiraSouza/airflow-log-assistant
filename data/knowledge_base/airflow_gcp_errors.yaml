@@ -1,0 +1,392 @@
+# Base de conhecimento do assistente.
+# Cada entrada descreve uma falha comum em pipelines Airflow + GCP.
+# O texto foi escrito para este projeto; os links apontam para a documentação oficial.
+#
+# Campos:
+#   id        identificador estável (usado na avaliação)
+#   title     nome curto da falha
+#   category  agrupamento (airflow, gcp, dados, infraestrutura, integracao)
+#   patterns  expressões regulares que costumam aparecer no log
+#   symptoms  como a falha aparece para quem olha o log
+#   cause     por que acontece
+#   fix       passos de correção, em ordem
+#   docs      links de referência
+
+- id: zombie_task
+  title: Tarefa zumbi (heartbeat perdido)
+  category: airflow
+  patterns:
+    - "zombie"
+    - "heartbeat"
+    - "no longer running"
+  symptoms: >
+    O scheduler marca a tarefa como falha com mensagem de zombie job ou de tarefa
+    que parou de enviar heartbeat, mesmo sem erro no código da tarefa.
+  cause: >
+    O processo que executava a tarefa morreu ou ficou travado sem avisar o
+    scheduler. Costuma acontecer quando o worker é reiniciado, o pod é removido
+    pelo Kubernetes ou a máquina fica sem recursos.
+  fix:
+    - Verifique se o worker ou pod foi reiniciado no horário da falha.
+    - Confira uso de CPU e memória do worker nesse período.
+    - Aumente os recursos do worker ou reduza a concorrência de tarefas.
+    - Configure retries na tarefa para tolerar quedas pontuais.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html
+
+- id: oom_sigkill
+  title: Tarefa encerrada por falta de memória (SIGKILL)
+  category: infraestrutura
+  patterns:
+    - "SIGKILL"
+    - "Negsignal"
+    - "return code -9"
+    - "OOMKilled"
+    - "MemoryError"
+  symptoms: >
+    A tarefa termina com código de retorno -9 ou sinal SIGKILL, ou o pod aparece
+    como OOMKilled, normalmente sem traceback Python.
+  cause: >
+    O processo passou do limite de memória e o sistema operacional ou o
+    Kubernetes o encerrou. É comum ao carregar um arquivo ou tabela inteira em um
+    DataFrame Pandas.
+  fix:
+    - Processe os dados em lotes (chunksize no Pandas) em vez de carregar tudo.
+    - Mova transformações pesadas para o BigQuery, usando SQL.
+    - Aumente o limite de memória do worker ou do pod.
+    - Leia só as colunas necessárias e use tipos de dados menores.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/troubleshooting.html
+
+- id: execution_timeout
+  title: Tempo máximo de execução excedido
+  category: airflow
+  patterns:
+    - "AirflowTaskTimeout"
+    - "execution_timeout"
+    - "Timeout, PID"
+  symptoms: >
+    A tarefa falha com AirflowTaskTimeout depois de rodar por um período fixo.
+  cause: >
+    A tarefa passou do execution_timeout configurado. Pode ser crescimento do
+    volume de dados, uma consulta lenta ou uma chamada externa que não responde.
+  fix:
+    - Compare o tempo de execução atual com o histórico da tarefa.
+    - Identifique a etapa lenta com logs de tempo por etapa.
+    - Otimize a consulta (filtros por partição, menos colunas) ou divida a tarefa.
+    - Só então ajuste o execution_timeout para um valor realista.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/tasks.html
+
+- id: connection_not_defined
+  title: Conexão do Airflow não encontrada
+  category: airflow
+  patterns:
+    - "conn_id"
+    - "isn't defined"
+    - "AirflowNotFoundException"
+  symptoms: >
+    A tarefa falha logo no início dizendo que um conn_id não está definido.
+  cause: >
+    O código usa um conn_id que não existe no ambiente atual. Acontece ao mudar
+    de ambiente (dev para prod), por erro de digitação ou quando a conexão vem de
+    um secrets backend que não foi configurado.
+  fix:
+    - Confira o nome exato do conn_id no código e em Admin > Connections.
+    - Crie a conexão no ambiente ou no secrets backend usado.
+    - Padronize nomes de conexões entre ambientes.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/howto/connection.html
+
+- id: variable_not_found
+  title: Variável do Airflow não encontrada
+  category: airflow
+  patterns:
+    - "Variable .* does not exist"
+    - "Variable.get"
+  symptoms: >
+    A DAG ou a tarefa falha com KeyError informando que uma Variable não existe.
+  cause: >
+    A Variable não foi criada no ambiente, tem outro nome ou foi removida.
+  fix:
+    - Crie a Variable em Admin > Variables ou no secrets backend.
+    - Use default_var em Variable.get quando houver um valor padrão seguro.
+    - Evite Variable.get no nível superior da DAG; leia dentro da tarefa ou via template.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/variables.html
+
+- id: dag_import_error
+  title: DAG quebrada por erro de importação
+  category: airflow
+  patterns:
+    - "Broken DAG"
+    - "ModuleNotFoundError"
+    - "ImportError"
+    - "No module named"
+  symptoms: >
+    A DAG some da interface ou aparece um aviso de Broken DAG com
+    ModuleNotFoundError ou ImportError.
+  cause: >
+    Uma biblioteca usada pela DAG não está instalada no ambiente do Airflow, ou
+    há erro de sintaxe ou de caminho no arquivo da DAG.
+  fix:
+    - Leia o traceback para identificar o módulo ausente.
+    - Adicione o pacote ao requirements do ambiente (versão fixa).
+    - Teste a importação localmente com python sua_dag.py antes do deploy.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/howto/dynamic-dag-generation.html
+    - https://airflow.apache.org/docs/apache-airflow/stable/best-practices.html
+
+- id: gcp_permission_denied
+  title: Permissão negada no Google Cloud (IAM)
+  category: gcp
+  patterns:
+    - "403"
+    - "Permission .* denied"
+    - "Access Denied"
+    - "does not have .* permission"
+    - "PermissionDenied"
+    - "Forbidden"
+  symptoms: >
+    A chamada ao BigQuery ou ao Cloud Storage falha com erro 403 dizendo que a
+    conta não tem uma permissão específica.
+  cause: >
+    A service account usada pelo Airflow não tem o papel IAM necessário no
+    projeto, dataset ou bucket.
+  fix:
+    - Identifique no log a permissão que falta e a conta usada.
+    - Conceda o papel mínimo que inclui essa permissão, no recurso certo.
+    - Confirme que a conexão do Airflow usa a service account esperada.
+  docs:
+    - https://cloud.google.com/bigquery/docs/access-control
+    - https://cloud.google.com/storage/docs/access-control/iam-permissions
+
+- id: bq_table_not_found
+  title: Tabela ou dataset do BigQuery não encontrado
+  category: gcp
+  patterns:
+    - "404 Not found: Table"
+    - "404 Not found: Dataset"
+    - "Not found: Table"
+    - "Not found: Dataset"
+  symptoms: >
+    A consulta ou carga falha com 404 informando que a tabela ou o dataset não existe.
+  cause: >
+    O nome está errado, a tabela ainda não foi criada pela tarefa anterior, o
+    projeto padrão é outro ou a região do dataset não bate com a do job.
+  fix:
+    - Confira projeto, dataset e tabela no nome completo usado.
+    - Verifique se a tarefa que cria a tabela rodou antes (dependência na DAG).
+    - Confirme a location do dataset e do job.
+  docs:
+    - https://cloud.google.com/bigquery/docs/error-messages
+
+- id: bq_schema_mismatch
+  title: Esquema incompatível na carga do BigQuery
+  category: dados
+  patterns:
+    - "schema"
+    - "does not match"
+    - "Field .* has changed type"
+    - "No such field"
+    - "Could not parse"
+    - "Error while reading data"
+    - "parsing error"
+  symptoms: >
+    A carga no BigQuery falha dizendo que o esquema não corresponde, que um campo
+    mudou de tipo ou que um valor não pôde ser convertido.
+  cause: >
+    O arquivo ou a fonte mudou (coluna nova, removida ou com outro tipo) e não
+    bate mais com a tabela de destino.
+  fix:
+    - Compare o esquema da fonte com o da tabela de destino.
+    - Para colunas novas, use schema_update_options com ALLOW_FIELD_ADDITION.
+    - Para tipos, converta na transformação ou carregue em tabela de staging.
+    - Adicione validação de esquema antes da carga.
+  docs:
+    - https://cloud.google.com/bigquery/docs/managing-table-schemas
+
+- id: gcs_object_not_found
+  title: Arquivo não encontrado no Cloud Storage
+  category: gcp
+  patterns:
+    - "No such object"
+    - "404 GET https://storage.googleapis.com"
+    - "NotFound: 404"
+    - "gs://"
+  symptoms: >
+    A leitura ou cópia de um arquivo no GCS falha com 404 No such object.
+  cause: >
+    O arquivo ainda não chegou, o caminho foi montado com data errada ou o nome
+    mudou na origem.
+  fix:
+    - Imprima o caminho completo que a tarefa tentou ler.
+    - Confira a data usada no template ({{ ds }} versus data do arquivo).
+    - Use um sensor de objeto do GCS antes da leitura.
+  docs:
+    - https://cloud.google.com/storage/docs/json_api/v1/status-codes
+
+- id: upstream_failed
+  title: Tarefa não executada porque uma anterior falhou
+  category: airflow
+  patterns:
+    - "upstream_failed"
+    - "UPSTREAM_FAILED"
+    - "trigger rule"
+    - "all_success"
+  symptoms: >
+    A tarefa fica em upstream_failed sem ter rodado, e o log mostra a regra de
+    disparo não satisfeita.
+  cause: >
+    Uma tarefa anterior falhou. A tarefa atual não tem erro próprio; ela só não
+    rodou por causa da regra all_success.
+  fix:
+    - Abra a primeira tarefa em vermelho da DAG; a causa real está nela.
+    - Corrija essa tarefa e limpe (clear) a partir dela.
+    - Para tarefas de limpeza ou alerta, use trigger_rule all_done.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dags.html
+
+- id: sensor_timeout
+  title: Sensor esgotou o tempo de espera
+  category: airflow
+  patterns:
+    - "AirflowSensorTimeout"
+    - "Sensor has timed out"
+    - "poke"
+  symptoms: >
+    Um sensor fica fazendo poke repetidas vezes e depois falha com AirflowSensorTimeout.
+  cause: >
+    A condição esperada (arquivo, partição, tarefa externa) não aconteceu dentro
+    do timeout do sensor.
+  fix:
+    - Confirme se o dado ou a tarefa esperada realmente atrasou na origem.
+    - Revise o caminho ou o identificador que o sensor está verificando.
+    - Use mode reschedule ou sensores deferrable para não ocupar slots.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/sensors.html
+
+- id: pool_no_slots
+  title: Tarefas presas na fila por falta de slots
+  category: airflow
+  patterns:
+    - "pool"
+    - "open slots"
+    - "max_active_tasks"
+    - "concurrency"
+  symptoms: >
+    As tarefas ficam em queued ou scheduled por muito tempo e o scheduler avisa
+    que não há slots livres no pool.
+  cause: >
+    O pool, o limite de tarefas ativas da DAG ou a capacidade dos workers está
+    toda ocupada, muitas vezes por sensores em modo poke.
+  fix:
+    - Veja em Admin > Pools quantos slots estão ocupados e por quais tarefas.
+    - Coloque sensores em mode reschedule ou deferrable.
+    - Ajuste o tamanho do pool ou max_active_tasks conforme a capacidade.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/pools.html
+
+- id: xcom_serialization
+  title: Erro ao salvar ou serializar XCom
+  category: airflow
+  patterns:
+    - "XCom"
+    - "not JSON serializable"
+    - "serialize"
+  symptoms: >
+    A tarefa termina o trabalho, mas falha ao retornar o valor com erro de
+    serialização ou de tamanho do XCom.
+  cause: >
+    A tarefa retorna um objeto que não vira JSON (DataFrame, datetime, conexão)
+    ou um volume grande de dados, que o banco de metadados não comporta.
+  fix:
+    - Retorne apenas valores pequenos, como caminhos, ids ou contagens.
+    - Salve dados grandes no GCS ou no BigQuery e passe só a referência.
+    - Converta tipos especiais (datas, Decimal) antes de retornar.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/xcoms.html
+
+- id: api_rate_limit
+  title: Limite de requisições da API externa (429)
+  category: integracao
+  patterns:
+    - "429"
+    - "Too Many Requests"
+    - "rate limit"
+    - "quota"
+  symptoms: >
+    Chamadas a uma API retornam 429 Too Many Requests ou mensagens de quota excedida.
+  cause: >
+    O pipeline faz mais requisições por período do que a API permite, muitas vezes
+    por tarefas paralelas ou por falta de espera entre chamadas.
+  fix:
+    - Implemente retry com backoff exponencial e respeite o header Retry-After.
+    - Limite a concorrência com um pool dedicado para essa API.
+    - Use paginação maior ou endpoints em lote quando existirem.
+  docs:
+    - https://cloud.google.com/storage/docs/retry-strategy
+
+- id: db_connection_refused
+  title: Banco de dados recusou ou derrubou a conexão
+  category: integracao
+  patterns:
+    - "OperationalError"
+    - "Connection refused"
+    - "could not connect to server"
+    - "server closed the connection"
+    - "too many connections"
+  symptoms: >
+    A tarefa falha com OperationalError dizendo que a conexão foi recusada,
+    fechada inesperadamente ou que há conexões demais.
+  cause: >
+    O banco está fora do ar, a rede ou o firewall bloqueia o acesso, as
+    credenciais mudaram ou o limite de conexões foi atingido.
+  fix:
+    - Teste a conexão a partir do worker (host, porta e credenciais).
+    - Verifique regras de firewall, VPC e IP autorizado.
+    - Feche conexões ao fim da tarefa e use pooling de conexões.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/howto/connection.html
+
+- id: jinja_template_error
+  title: Erro de template Jinja
+  category: airflow
+  patterns:
+    - "jinja2"
+    - "UndefinedError"
+    - "TemplateSyntaxError"
+    - "is undefined"
+  symptoms: >
+    A tarefa falha antes de executar, ao renderizar campos com {{ }}.
+  cause: >
+    O template usa uma variável ou macro que não existe, tem erro de sintaxe ou
+    o campo não está na lista template_fields do operador.
+  fix:
+    - Veja os valores renderizados na aba Rendered Template da tarefa.
+    - Confira o nome das macros (ds, data_interval_start, params).
+    - Para valores próprios, passe via params e use {{ params.nome }}.
+  docs:
+    - https://airflow.apache.org/docs/apache-airflow/stable/templates-ref.html
+
+- id: dataframe_missing_column
+  title: Coluna ausente na transformação com Pandas
+  category: dados
+  patterns:
+    - "KeyError"
+    - "not in index"
+    - "None of \\["
+    - "columns"
+  symptoms: >
+    A transformação falha com KeyError ou com aviso de coluna que não está no
+    índice ao acessar um campo do DataFrame.
+  cause: >
+    A fonte de dados mudou de formato: uma coluna foi renomeada, removida ou veio
+    com outra caixa ou espaços no nome.
+  fix:
+    - Registre no log as colunas recebidas (df.columns) antes da transformação.
+    - Normalize nomes de colunas (minúsculas, sem espaços) logo na leitura.
+    - Valide as colunas obrigatórias e falhe com uma mensagem clara.
+    - Combine com a área dona da fonte um contrato de dados.
+  docs:
+    - https://pandas.pydata.org/docs/user_guide/indexing.html

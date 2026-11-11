@@ -1,0 +1,244 @@
+# Logs sintéticos, criados para este projeto (não vêm de nenhuma empresa).
+# Cada log tem a causa esperada (expected), usada pelo script de avaliação.
+# difficulty: easy = a mensagem de erro é direta; hard = há pistas enganosas ou
+# a causa real não aparece com o nome óbvio.
+
+- name: 01_oom_carga_vendas
+  expected: oom_sigkill
+  difficulty: easy
+  log: |
+    [2026-10-14, 03:12:08 UTC] {taskinstance.py:1157} INFO - Executing <Task(PythonOperator): transform_sales> on 2026-10-13
+    [2026-10-14, 03:12:09 UTC] {logging_mixin.py:188} INFO - Lendo gs://raw-zone/sales/2026-10-13/sales_full.csv
+    [2026-10-14, 03:19:41 UTC] {local_task_job_runner.py:234} INFO - Task exited with return code Negsignal.SIGKILL
+    [2026-10-14, 03:19:41 UTC] {taskinstance.py:1400} INFO - Marking task as FAILED. dag_id=sales_daily, task_id=transform_sales
+
+- name: 02_timeout_query
+  expected: execution_timeout
+  difficulty: easy
+  log: |
+    [2026-10-15, 05:00:02 UTC] {taskinstance.py:1157} INFO - Executing <Task(PythonOperator): aggregate_orders> on 2026-10-14
+    [2026-10-15, 06:00:02 UTC] {timeout.py:68} ERROR - Process timed out, PID: 4812
+    Traceback (most recent call last):
+      File "/opt/airflow/dags/orders/aggregate.py", line 52, in aggregate
+        rows = cursor.fetchall()
+      File "/home/airflow/.local/lib/python3.11/site-packages/airflow/utils/timeout.py", line 69, in handle_timeout
+        raise AirflowTaskTimeout(self.error_message)
+    airflow.exceptions.AirflowTaskTimeout: Timeout, PID: 4812
+    [2026-10-15, 06:00:02 UTC] {taskinstance.py:1400} INFO - Marking task as UP_FOR_RETRY.
+
+- name: 03_conexao_inexistente
+  expected: connection_not_defined
+  difficulty: easy
+  log: |
+    [2026-10-16, 02:00:05 UTC] {taskinstance.py:1157} INFO - Executing <Task(SQLExecuteQueryOperator): extract_customers>
+    [2026-10-16, 02:00:05 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    Traceback (most recent call last):
+      File "/home/airflow/.local/lib/python3.11/site-packages/airflow/hooks/base.py", line 83, in get_connection
+        conn = Connection.get_connection_from_secrets(conn_id)
+    airflow.exceptions.AirflowNotFoundException: The conn_id `postgres_crm_prod` isn't defined
+
+- name: 04_variable_ausente
+  expected: variable_not_found
+  difficulty: easy
+  log: |
+    [2026-10-16, 07:30:11 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    Traceback (most recent call last):
+      File "/opt/airflow/dags/marketing/campaigns.py", line 21, in load_campaigns
+        bucket = Variable.get("marketing_bucket")
+      File "/home/airflow/.local/lib/python3.11/site-packages/airflow/models/variable.py", line 143, in get
+        raise KeyError(f"Variable {key} does not exist")
+    KeyError: 'Variable marketing_bucket does not exist'
+
+- name: 05_dag_quebrada
+  expected: dag_import_error
+  difficulty: easy
+  log: |
+    Broken DAG: [/opt/airflow/dags/finance/invoices_dag.py]
+    Traceback (most recent call last):
+      File "<frozen importlib._bootstrap>", line 241, in _call_with_frames_removed
+      File "/opt/airflow/dags/finance/invoices_dag.py", line 7, in <module>
+        import openpyxl
+    ModuleNotFoundError: No module named 'openpyxl'
+
+- name: 06_permissao_bigquery
+  expected: gcp_permission_denied
+  difficulty: easy
+  log: |
+    [2026-10-17, 04:10:44 UTC] {bigquery.py:1595} INFO - Inserting job airflow_load_events_1697515844
+    [2026-10-17, 04:10:45 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    google.api_core.exceptions.Forbidden: 403 POST https://bigquery.googleapis.com/bigquery/v2/projects/analytics-prd/jobs: Access Denied: Project analytics-prd: User does not have bigquery.jobs.create permission in project analytics-prd.
+
+- name: 07_tabela_inexistente
+  expected: bq_table_not_found
+  difficulty: easy
+  log: |
+    [2026-10-17, 06:02:13 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    google.api_core.exceptions.NotFound: 404 Not found: Table analytics-prd:staging.orders_clean was not found in location US
+    Location: US
+    Job ID: 6c1e2b9a-0f3d-4c4e-9f6b-2f8d1a7b3c55
+
+- name: 08_esquema_bigquery
+  expected: bq_schema_mismatch
+  difficulty: easy
+  log: |
+    [2026-10-18, 01:45:20 UTC] {bigquery.py:1595} INFO - Inserting job airflow_load_payments
+    [2026-10-18, 01:45:39 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    google.api_core.exceptions.BadRequest: 400 Provided Schema does not match Table analytics-prd:finance.payments. Field amount has changed type from NUMERIC to STRING
+
+- name: 09_arquivo_gcs
+  expected: gcs_object_not_found
+  difficulty: easy
+  log: |
+    [2026-10-18, 03:00:07 UTC] {gcs.py:338} INFO - Downloading gs://partner-drop/stock/2026-10-18/stock.json
+    [2026-10-18, 03:00:08 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    google.api_core.exceptions.NotFound: 404 GET https://storage.googleapis.com/download/storage/v1/b/partner-drop/o/stock%2F2026-10-18%2Fstock.json?alt=media: No such object: partner-drop/stock/2026-10-18/stock.json
+
+- name: 10_upstream
+  expected: upstream_failed
+  difficulty: easy
+  log: |
+    [2026-10-19, 02:30:00 UTC] {taskinstance.py:1135} INFO - Dependencies not met for <TaskInstance: sales_daily.publish_dashboard scheduled__2026-10-18T02:00:00+00:00 [upstream_failed]>, dependency 'Trigger Rule' FAILED: Task's trigger rule 'all_success' requires all upstream tasks to have succeeded, but found 1 non-success(es). upstream_states=_UpstreamTIStates(success=2, skipped=0, failed=1, upstream_failed=0, removed=0, done=3)
+
+- name: 11_sensor
+  expected: sensor_timeout
+  difficulty: easy
+  log: |
+    [2026-10-19, 04:00:00 UTC] {gcs.py:94} INFO - Sensor checks existence of : partner-drop, stock/2026-10-19/_SUCCESS
+    [2026-10-19, 04:05:00 UTC] {gcs.py:94} INFO - Sensor checks existence of : partner-drop, stock/2026-10-19/_SUCCESS
+    [2026-10-19, 10:00:00 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    airflow.exceptions.AirflowSensorTimeout: Sensor has timed out; run duration of 21600.12 seconds exceeds the specified timeout of 21600.0.
+
+- name: 12_pool
+  expected: pool_no_slots
+  difficulty: easy
+  log: |
+    [2026-10-20, 02:15:00 UTC] {scheduler_job_runner.py:497} INFO - Not executing <TaskInstance: crm_sync.extract_contacts scheduled__2026-10-20T02:00:00+00:00 [scheduled]> since the pool 'crm_api_pool' has no open slots (0 available, 3 in use)
+    [2026-10-20, 02:45:00 UTC] {scheduler_job_runner.py:497} INFO - Not executing <TaskInstance: crm_sync.extract_contacts scheduled__2026-10-20T02:00:00+00:00 [scheduled]> since the pool 'crm_api_pool' has no open slots (0 available, 3 in use)
+
+- name: 13_xcom
+  expected: xcom_serialization
+  difficulty: easy
+  log: |
+    [2026-10-20, 08:11:52 UTC] {python.py:202} INFO - Done. Returned value was:        order_id  total
+    0      10231  59.90
+    [2026-10-20, 08:11:52 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    Traceback (most recent call last):
+      File "/home/airflow/.local/lib/python3.11/site-packages/airflow/models/xcom.py", line 668, in serialize_value
+        return json.dumps(value, cls=XComEncoder).encode("UTF-8")
+    TypeError: Object of type DataFrame is not JSON serializable
+
+- name: 14_rate_limit
+  expected: api_rate_limit
+  difficulty: easy
+  log: |
+    [2026-10-21, 09:00:14 UTC] {http.py:174} INFO - Sending 'GET' to url: https://api.parceiro.example/v2/orders?page=88
+    [2026-10-21, 09:00:14 UTC] {http.py:201} ERROR - HTTP error: Too Many Requests
+    [2026-10-21, 09:00:14 UTC] {http.py:202} ERROR - {"error": "rate limit exceeded", "retry_after": 60}
+    airflow.exceptions.AirflowException: 429:Too Many Requests
+
+- name: 15_banco_recusou
+  expected: db_connection_refused
+  difficulty: easy
+  log: |
+    [2026-10-21, 01:00:03 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    psycopg2.OperationalError: connection to server at "10.20.0.15", port 5432 failed: Connection refused
+        Is the server running on that host and accepting TCP/IP connections?
+
+- name: 16_jinja
+  expected: jinja_template_error
+  difficulty: easy
+  log: |
+    [2026-10-22, 02:00:01 UTC] {abstractoperator.py:707} ERROR - Exception rendering Jinja template for task 'load_partition', field 'sql'. Template: 'SELECT * FROM raw.events WHERE dt = "{{ params.run_date }}"'
+    Traceback (most recent call last):
+      File "/home/airflow/.local/lib/python3.11/site-packages/jinja2/environment.py", line 1301, in render
+    jinja2.exceptions.UndefinedError: 'dict object' has no attribute 'run_date'
+
+- name: 17_coluna_pandas
+  expected: dataframe_missing_column
+  difficulty: easy
+  log: |
+    [2026-10-22, 04:20:31 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    Traceback (most recent call last):
+      File "/opt/airflow/dags/crm/clean_customers.py", line 34, in clean
+        df["customer_id"] = df["customer_id"].astype(str)
+      File "/home/airflow/.local/lib/python3.11/site-packages/pandas/core/frame.py", line 4102, in __getitem__
+        indexer = self.columns.get_loc(key)
+    KeyError: 'customer_id'
+
+- name: 18_zumbi
+  expected: zombie_task
+  difficulty: easy
+  log: |
+    [2026-10-23, 03:41:10 UTC] {scheduler_job_runner.py:1789} ERROR - Detected zombie job: {'full_filepath': '/opt/airflow/dags/sales/sales_daily.py', 'processor_subdir': '/opt/airflow/dags', 'msg': 'Detected <TaskInstance: sales_daily.transform_sales scheduled__2026-10-22T03:00:00+00:00 [running]> as zombie', 'simple_task_instance': <airflow.models.taskinstance.SimpleTaskInstance object at 0x7f>, 'is_failure_callback': True}
+
+# --- Casos difíceis ---
+
+- name: 19_gcs_mas_permissao
+  expected: gcp_permission_denied
+  difficulty: hard
+  # O caminho gs:// aparece, mas o problema é IAM, não arquivo ausente.
+  log: |
+    [2026-10-24, 05:05:12 UTC] {gcs.py:338} INFO - Downloading gs://finance-exports/ledger/2026-10-23.parquet
+    [2026-10-24, 05:05:13 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    google.api_core.exceptions.Forbidden: 403 GET https://storage.googleapis.com/download/storage/v1/b/finance-exports/o/ledger%2F2026-10-23.parquet?alt=media: airflow-sa@analytics-prd.iam.gserviceaccount.com does not have storage.objects.get access to the Google Cloud Storage object. Permission 'storage.objects.get' denied on resource (or it may not exist).
+
+- name: 20_pod_oomkilled
+  expected: oom_sigkill
+  difficulty: hard
+  # Não há SIGKILL; a pista é o estado do pod no Kubernetes.
+  log: |
+    [2026-10-24, 07:12:44 UTC] {pod_manager.py:466} INFO - Pod spark-like-transform-8f2k has phase Running
+    [2026-10-24, 07:18:02 UTC] {pod.py:944} ERROR - Pod spark-like-transform-8f2k returned a failure.
+    remote_pod: {'status': {'container_statuses': [{'name': 'base', 'state': {'terminated': {'exit_code': 137, 'reason': 'OOMKilled'}}}], 'phase': 'Failed'}}
+    airflow.exceptions.AirflowException: Pod spark-like-transform-8f2k returned a failure.
+
+- name: 21_timeout_api_externa
+  expected: execution_timeout
+  difficulty: hard
+  # Fala de API e de requests, mas a falha é o tempo máximo da tarefa.
+  log: |
+    [2026-10-25, 01:00:00 UTC] {logging_mixin.py:188} INFO - Requesting page 1/320 from https://api.parceiro.example/v2/catalog
+    [2026-10-25, 03:00:00 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    Traceback (most recent call last):
+      File "/opt/airflow/dags/catalog/pull_catalog.py", line 40, in pull
+        resp = requests.get(url, params=params)
+    airflow.exceptions.AirflowTaskTimeout: Timeout, PID: 9921
+
+- name: 22_esquema_novo_campo
+  expected: bq_schema_mismatch
+  difficulty: hard
+  # Não diz "schema does not match"; o sinal é o campo desconhecido no JSON.
+  log: |
+    [2026-10-25, 06:30:55 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    google.api_core.exceptions.BadRequest: 400 Error while reading data, error message: JSON table encountered too many errors, giving up. Rows: 1; errors: 1. Please look into the errors[] collection for more details. File: gs://raw-zone/events/2026-10-25/part-0001.json
+    Error while reading data, error message: JSON parsing error in row starting at position 0: No such field: device_category.
+
+# --- Falhas fora da base (o certo é responder "desconhecido") ---
+
+- name: 23_encoding
+  expected: desconhecido
+  difficulty: hard
+  log: |
+    [2026-10-26, 03:03:03 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    Traceback (most recent call last):
+      File "/opt/airflow/dags/partners/read_csv.py", line 18, in read
+        rows = f.read()
+    UnicodeDecodeError: 'utf-8' codec can't decode byte 0xe7 in position 1088: invalid continuation byte
+
+- name: 24_permissao_arquivo_local
+  expected: desconhecido
+  difficulty: hard
+  # "Permission denied" aqui é do sistema de arquivos, não do IAM do Google Cloud.
+  log: |
+    [2026-10-26, 04:10:00 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    PermissionError: [Errno 13] Permission denied: '/opt/airflow/tmp/report.xlsx'
+
+- name: 25_divisao_zero
+  expected: desconhecido
+  difficulty: hard
+  log: |
+    [2026-10-26, 05:00:00 UTC] {taskinstance.py:2698} ERROR - Task failed with exception
+    Traceback (most recent call last):
+      File "/opt/airflow/dags/kpis/conversion.py", line 27, in compute
+        rate = orders / visits
+    ZeroDivisionError: division by zero
